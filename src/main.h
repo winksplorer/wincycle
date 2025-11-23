@@ -7,5 +7,6 @@ Window *winlist (Display *disp, unsigned long *len);
 char *winame (Display *disp, Window win); 
 void stolower(char* p);
 void activate_window(Display *dpy, Window win);
+int forkexec(const char* process);
 
 #endif

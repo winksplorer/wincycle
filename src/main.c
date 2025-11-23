@@ -6,32 +6,29 @@
 #include <X11/Xutil.h>
 #include <errno.h>
 #include <ctype.h>
+#include <unistd.h>
 
 #include "main.h"
 
  
 int main(int argc, char *argv[]) {
     // error if no requested window
-    if (argc != 2) return printf("usage: wincycle <app name>\n"), 2;
+    if (argc < 2 || argc > 3) return printf("usage: wincycle <app name> <optional: program to launch>\n"), 2;
 
-    Display *disp = XOpenDisplay(NULL);
- 
-    if (!disp) {
-        puts("no display!");
-        return -1;
-    }
+    Display* disp = XOpenDisplay(NULL);
+    if (!disp) return printf("no display!\n"), 1;
  
     unsigned long len;
-    Window *list;
-    list = (Window*)winlist(disp,&len);
+    Window* list = (Window*)winlist(disp,&len);
  
     char *name;
     for (unsigned long i = 0; i < len; i++) {
         name = winame(disp,list[i]);
-        printf("-->%s<--\n",name);
         stolower(name);
+        printf("-->%s<--\n",name);
+
         if (!strncmp(name, argv[1], strlen(argv[1]))) {
-            printf("%s == %s\n", name, argv[1]);
+            printf("%s (0x%lX) == %s\n", name, list[i], argv[1]);
             activate_window(disp, list[i]);
             free(name);
             return 0;
@@ -41,18 +38,25 @@ int main(int argc, char *argv[]) {
     }
  
     XFree(list);
- 
     XCloseDisplay(disp);
-    return 0;
+
+    // if no results
+    printf("could not find any open \"%s\", going to exec now\n", argv[1]);
+    char *args[] = { argc > 2 ? argv[2] : argv[1], NULL };
+    execvp(args[0], args);
+
+    // if we still have control then exec failed
+    perror("could not exec");
+    return 1;
 }
  
  
 Window *winlist (Display *disp, unsigned long *len) {
-    Atom prop = XInternAtom(disp,"_NET_CLIENT_LIST",False), type;
+    Atom prop = XInternAtom(disp,"_NET_CLIENT_LIST_STACKING",False), type;
     int form;
     unsigned long remain;
     unsigned char *list;
- 
+
     errno = 0;
     if (XGetWindowProperty(disp,XDefaultRootWindow(disp),prop,0,1024,False,XA_WINDOW,
                 &type,&form,len,&remain,&list) != Success) {
@@ -90,9 +94,9 @@ void activate_window(Display *dpy, Window win) {
     e.message_type = net_active;
     e.format = 32;
 
-    e.data.l[0] = 1;  // 1 = request active (source: application)
+    e.data.l[0] = 1;
     e.data.l[1] = CurrentTime;
-    e.data.l[2] = 0;  // usually unused
+    e.data.l[2] = 0;
 
     XSendEvent(
         dpy,
