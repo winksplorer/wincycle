@@ -3,10 +3,12 @@
 
 #include <X11/Xlib.h>
 
-Window *winlist (Display *disp, unsigned long *len);
-char *winame (Display *disp, Window win); 
+Window* winlist (Display* dpy, unsigned long* len);
+char* winame (Display* dpy, Window win); 
+Window get_active_window(Display* dpy);
+int filter_by_class(Display* dpy, Window* in, int nin, const char* wclass, Window* out, int maxout);
+int index_of(Window* list, int n, Window w);
 void stolower(char* p);
-void activate_window(Display *dpy, Window win);
-int forkexec(const char* process);
+void activate_window(Display* dpy, Window win);
 
 #endif

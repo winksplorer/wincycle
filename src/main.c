@@ -11,38 +11,43 @@
 #include "main.h"
 
  
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
     // error if no requested window
     if (argc < 2 || argc > 3) return printf("usage: wincycle <app name> <optional: program to launch>\n"), 2;
 
-    Display* disp = XOpenDisplay(NULL);
-    if (!disp) return printf("no display!\n"), 1;
+    // display
+    Display* dpy = XOpenDisplay(NULL);
+    if (!dpy) return printf("no display!\n"), 1;
  
+    // _net_client_list
     unsigned long len;
-    Window* list = (Window*)winlist(disp,&len);
- 
-    char *name;
-    for (unsigned long i = 0; i < len; i++) {
-        name = winame(disp,list[i]);
-        stolower(name);
-        printf("-->%s<--\n",name);
+    Window* list = (Window*)winlist(dpy,&len);
 
-        if (!strncmp(name, argv[1], strlen(argv[1]))) {
-            printf("%s (0x%lX) == %s\n", name, list[i], argv[1]);
-            activate_window(disp, list[i]);
-            free(name);
-            return 0;
-        }
+    // match
+    Window matches[64];
+    int nmatches = filter_by_class(dpy, list, len, argv[1], matches, 64);
 
-        free(name);
+    // cycle & activate
+    if (nmatches) {
+        Window active = get_active_window(dpy);
+
+        int i = index_of(matches, nmatches, active);
+
+        if (i >= 0) activate_window(dpy, matches[(i+1) % nmatches]);
+        else activate_window(dpy, matches[0]);
+
+        XFree(list);
+        XCloseDisplay(dpy);
+
+        return 0;
     }
  
     XFree(list);
-    XCloseDisplay(disp);
+    XCloseDisplay(dpy);
 
     // if no results
     printf("could not find any open \"%s\", going to exec now\n", argv[1]);
-    char *args[] = { argc > 2 ? argv[2] : argv[1], NULL };
+    char* args[] = { argc > 2 ? argv[2] : argv[1], NULL };
     execvp(args[0], args);
 
     // if we still have control then exec failed
@@ -51,16 +56,16 @@ int main(int argc, char *argv[]) {
 }
  
  
-Window *winlist (Display *disp, unsigned long *len) {
-    Atom prop = XInternAtom(disp,"_NET_CLIENT_LIST_STACKING",False), type;
+Window* winlist(Display* dpy, unsigned long* len) {
+    Atom prop = XInternAtom(dpy,"_NET_CLIENT_LIST",False), type;
     int form;
     unsigned long remain;
-    unsigned char *list;
+    unsigned char* list;
 
     errno = 0;
-    if (XGetWindowProperty(disp,XDefaultRootWindow(disp),prop,0,1024,False,XA_WINDOW,
+    if (XGetWindowProperty(dpy,XDefaultRootWindow(dpy),prop,0,1024,False,XA_WINDOW,
                 &type,&form,len,&remain,&list) != Success) {
-        perror("winlist() -- GetWinProp");
+        perror("winlist: XGetWindowProperty");
         return 0;
     }
      
@@ -68,10 +73,10 @@ Window *winlist (Display *disp, unsigned long *len) {
 }
  
  
-char *winame (Display *disp, Window win) {
+char* winame(Display* dpy, Window win) {
     XClassHint hint;
     char* n = malloc(64);
-    if (XGetClassHint(disp, win, &hint)) {
+    if (XGetClassHint(dpy, win, &hint)) {
         n = strncpy(n, hint.res_class, 64);
         XFree(hint.res_name);
         XFree(hint.res_class);
@@ -80,11 +85,47 @@ char *winame (Display *disp, Window win) {
     return n;
 }
 
-void stolower(char* p) {
-    for ( ; *p; ++p) *p = tolower(*p);
+Window get_active_window(Display* dpy) {
+    Atom prop = XInternAtom(dpy,"_NET_ACTIVE_WINDOW",False), type;
+    int form;
+    unsigned long len;
+    unsigned long remain;
+    unsigned char* data;
+
+    errno = 0;
+    if (XGetWindowProperty(dpy,XDefaultRootWindow(dpy),prop,0,1024,False,XA_WINDOW,
+                &type,&form,&len,&remain,&data) != Success) {
+        perror("get_active_window: XGetWindowProperty");
+        return 0;
+    }
+     
+    Window win = ((Window*) data)[0];
+    XFree(data);
+    return win;
 }
 
-void activate_window(Display *dpy, Window win) {
+int filter_by_class(Display* dpy, Window* in, int nin, const char* wclass, Window* out, int maxout) {
+    int nout = 0;
+    for (int i = 0; i < nin && nout < maxout; i++) {
+        // get name
+        char* name = winame(dpy, in[i]);
+        stolower(name);
+
+        // compare
+        if (!strcmp(name, wclass) ) out[nout++] = in[i];
+        free(name);
+    }
+    
+    return nout;
+}
+
+int index_of(Window* list, int n, Window w) {
+    for (int i = 0; i < n; i++)
+        if (list[i] == w) return i;
+    return -1;
+}
+
+void activate_window(Display* dpy, Window win) {
     XClientMessageEvent e = {0};
     Atom net_active = XInternAtom(dpy, "_NET_ACTIVE_WINDOW", False);
     Atom net_wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
@@ -107,4 +148,8 @@ void activate_window(Display *dpy, Window win) {
     );
 
     XFlush(dpy);
+}
+
+void stolower(char* p) {
+    for (;*p;++p) *p = tolower(*p);
 }
