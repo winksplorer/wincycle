@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -115,6 +116,20 @@ activate_win(Display *dpy, Window win) {
     XFlush(dpy);
 }
 
+static void
+spawn(char *const argv[])
+{
+     switch (fork()) {
+     case 0:
+        setsid();
+        execvp(argv[0], argv);
+        perror("execvp");
+        _exit(1);
+     case -1:
+        perror("fork");
+     }
+}
+
  
 int
 main(int argc, char *argv[]) {
@@ -123,8 +138,8 @@ main(int argc, char *argv[]) {
     Window* list;
     int nmatches;
     Window matches[64];
-    char *args[2] = {NULL};
     int i;
+    int open_attempts = 0;
 
     // valid args?
     if (argc < 2 || argc > 3) usage(argv[0]);
@@ -133,6 +148,7 @@ main(int argc, char *argv[]) {
     dpy = XOpenDisplay(NULL);
     if (!dpy) return printf("no display\n"), 1;
  
+window_open:
     // filter the window list
     list = (Window*)win_list(dpy,&len);
     nmatches = win_class_filter(dpy, list, len, argv[1], matches, 64);
@@ -141,19 +157,27 @@ main(int argc, char *argv[]) {
     if (nmatches) {
         i = index_of(matches, nmatches, active_win(dpy));
         activate_win(dpy, i >= 0 ? matches[(i+1) % nmatches] : matches[0]);
-    }
- 
-    XFree(list);
-    XCloseDisplay(dpy);
 
-    if (nmatches)
+        XFree(list);
+        XCloseDisplay(dpy);
+
         return 0;
+    }
 
     // exec
-    printf("could not find any open \"%s\", going to exec now\n", argv[1]);
-    args[0] = argc > 2 ? argv[2] : argv[1];
-    execvp(args[0], args);
+    if (!open_attempts) {
+        printf("could not find any open \"%s\", going to exec now\n", argv[1]);
+        spawn((char*[]){ argc > 2 ? argv[2] : argv[1], NULL });
+    }
 
-    perror("execvp");
+    // HACK!!!!
+    if (open_attempts < 100) {
+        struct timespec req = { .tv_sec = 0, .tv_nsec = 10000000L };
+        nanosleep(&req, NULL);
+        open_attempts++;
+        goto window_open;
+    }
+
+    printf("timed out waiting for window to open\n");
     return 1;
 }
